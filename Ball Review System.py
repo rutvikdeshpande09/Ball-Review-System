@@ -20,7 +20,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SENDER_EMAIL = "rutvikdeshpande11@gmail.com"
 SENDER_PASSWORD = "vpch toji olin pfsc"
-RECIPIENT_EMAIL = "rutvikdeshpande11@gmail.com"
+RECIPIENT_EMAIL = "rishaan.d.homeacct@gmail.com"
 
 # Configuration
 recordings_folder = "ball_review_recordings"  # Folder to save recordings
