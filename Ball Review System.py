@@ -84,14 +84,11 @@ def add_frame_to_buffer(frame):
     global frame_buffer, buffer_max_frames
     
     # Convert frame to BGR for storage
-    if len(frame.shape) == 3 and frame.shape[2] == 4:  # XRGB8888 format
-        try:
-            bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-        except:
-            rgb_frame = frame[:, :, 1:4].copy()
-            bgr_frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+    if len(frame.shape) == 3 and frame.shape[2] == 4:  # XRGB8888 format (BGRA in OpenCV)
+        bgr_frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
     elif len(frame.shape) == 3 and frame.shape[2] == 3:
-        bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        # Already BGR
+        bgr_frame = frame
     else:
         bgr_frame = frame.copy()
     
@@ -372,7 +369,7 @@ print(f"[INFO] Press '{chr(SAVE_KEY)}' to save and email recording, '{chr(QUIT_K
 start_recording()
 
 frame_count = 0
-start_time = time.time()
+fps_start_time = time.time()
 fps = 0
 
 try:
@@ -388,14 +385,11 @@ try:
         
         if is_recording and camera_writer is not None and not save_requested:
             # Convert frame to BGR for video writer
-            if len(frame.shape) == 3 and frame.shape[2] == 4:  # XRGB8888 format
-                try:
-                    bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-                except:
-                    rgb_frame = frame[:, :, 1:4].copy()
-                    bgr_frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+            if len(frame.shape) == 3 and frame.shape[2] == 4:  # XRGB8888 format (BGRA in OpenCV)
+                bgr_frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
             elif len(frame.shape) == 3 and frame.shape[2] == 3:
-                bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # Already BGR
+                bgr_frame = frame
             else:
                 bgr_frame = frame.copy()
             
@@ -433,11 +427,11 @@ try:
         
         # Calculate and display FPS
         frame_count += 1
-        elapsed_time = time.time() - start_time
+        elapsed_time = time.time() - fps_start_time
         if elapsed_time > 1:
             fps = frame_count / elapsed_time
             frame_count = 0
-            start_time = time.time()
+            fps_start_time = time.time()
         
         cv2.putText(display_frame, f"FPS: {fps:.1f}", (display_frame.shape[1] - 150, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
@@ -459,11 +453,11 @@ try:
             print(f"[INFO] Save key pressed. Saving and sending recording...")
             result = stop_and_save_recording()
             if result:
-                video_path, start_time = result
+                video_path, recording_start_dt = result
                 # Process and send in background thread
                 email_thread = threading.Thread(
                     target=process_and_send_recording,
-                    args=(video_path, start_time),
+                    args=(video_path, recording_start_dt),
                     daemon=True
                 )
                 email_thread.start()
