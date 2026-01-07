@@ -27,6 +27,8 @@ recordings_folder = "ball_review_recordings"  # Folder to save recordings
 fps_target = 30  # Target FPS for recording
 SAVE_KEY = ord('s')  # Press 's' to save and send recording
 QUIT_KEY = ord('q')  # Press 'q' to quit
+RUTVIK_KEY = ord('r')  # Press 'r' for rutvik review
+RISHaan_KEY = ord('n')  # Press 'n' for rishaan review
 
 # Recording buffer settings (seconds to keep before save key press)
 RECORDING_BUFFER_SECONDS = 10  # Keep last 10 seconds before save
@@ -54,6 +56,12 @@ recording_lock = threading.Lock()
 frame_buffer = []  # Circular buffer for recent frames
 buffer_max_frames = RECORDING_BUFFER_SECONDS * fps_target
 save_requested = False
+
+# Scoreboard state
+rutvik_reviews = 2  # Number of reviews left for rutvik
+rishaan_reviews = 2  # Number of reviews left for rishaan
+pending_review = None  # 'rutvik' or 'rishaan' when waiting for Y/n confirmation
+confirmation_message = ""  # Message to display during confirmation
 
 def start_recording():
     """Start recording camera"""
@@ -343,6 +351,173 @@ def process_and_send_recording(video_path, start_time):
         import traceback
         traceback.print_exc()
 
+def draw_scoreboard(frame):
+    """Draw the mini scoreboard on the frame"""
+    global rutvik_reviews, rishaan_reviews
+    
+    # Scoreboard dimensions and position
+    board_width = 300
+    board_height = 150
+    board_x = frame.shape[1] - board_width - 20  # Right side with 20px margin
+    board_y = 20  # Top with 20px margin
+    
+    # Draw background rectangle
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (board_x, board_y), (board_x + board_width, board_y + board_height), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+    
+    # Draw border
+    cv2.rectangle(frame, (board_x, board_y), (board_x + board_width, board_y + board_height), (255, 255, 255), 2)
+    
+    # Calculate block dimensions
+    block_width = board_width // 2
+    block_height = board_height // 2
+    
+    # Top left block - Rutvik name
+    top_left_x = board_x
+    top_left_y = board_y
+    cv2.rectangle(frame, (top_left_x, top_left_y), (top_left_x + block_width, top_left_y + block_height), (50, 50, 50), -1)
+    cv2.rectangle(frame, (top_left_x, top_left_y), (top_left_x + block_width, top_left_y + block_height), (255, 255, 255), 1)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    text = "RUTVIK"
+    (text_width, text_height), baseline = cv2.getTextSize(text, font, 0.6, 2)
+    text_x = top_left_x + (block_width - text_width) // 2
+    text_y = top_left_y + (block_height + text_height) // 2
+    cv2.putText(frame, text, (text_x, text_y), font, 0.6, (255, 255, 255), 2)
+    
+    # Top right block - Rishaan name
+    top_right_x = board_x + block_width
+    top_right_y = board_y
+    cv2.rectangle(frame, (top_right_x, top_right_y), (top_right_x + block_width, top_right_y + block_height), (50, 50, 50), -1)
+    cv2.rectangle(frame, (top_right_x, top_right_y), (top_right_x + block_width, top_right_y + block_height), (255, 255, 255), 1)
+    text = "RISHAAN"
+    (text_width, text_height), baseline = cv2.getTextSize(text, font, 0.6, 2)
+    text_x = top_right_x + (block_width - text_width) // 2
+    text_y = top_right_y + (block_height + text_height) // 2
+    cv2.putText(frame, text, (text_x, text_y), font, 0.6, (255, 255, 255), 2)
+    
+    # Bottom left block - Rutvik reviews
+    bottom_left_x = board_x
+    bottom_left_y = board_y + block_height
+    # Color based on reviews left
+    if rutvik_reviews > 0:
+        block_color = (0, 150, 0)  # Green
+    else:
+        block_color = (0, 0, 150)  # Red
+    cv2.rectangle(frame, (bottom_left_x, bottom_left_y), (bottom_left_x + block_width, bottom_left_y + block_height), block_color, -1)
+    cv2.rectangle(frame, (bottom_left_x, bottom_left_y), (bottom_left_x + block_width, bottom_left_y + block_height), (255, 255, 255), 1)
+    text = str(rutvik_reviews)
+    (text_width, text_height), baseline = cv2.getTextSize(text, font, 1.2, 3)
+    text_x = bottom_left_x + (block_width - text_width) // 2
+    text_y = bottom_left_y + (block_height + text_height) // 2
+    cv2.putText(frame, text, (text_x, text_y), font, 1.2, (255, 255, 255), 3)
+    
+    # Bottom right block - Rishaan reviews
+    bottom_right_x = board_x + block_width
+    bottom_right_y = board_y + block_height
+    # Color based on reviews left
+    if rishaan_reviews > 0:
+        block_color = (0, 150, 0)  # Green
+    else:
+        block_color = (0, 0, 150)  # Red
+    cv2.rectangle(frame, (bottom_right_x, bottom_right_y), (bottom_right_x + block_width, bottom_right_y + block_height), block_color, -1)
+    cv2.rectangle(frame, (bottom_right_x, bottom_right_y), (bottom_right_x + block_width, bottom_right_y + block_height), (255, 255, 255), 1)
+    text = str(rishaan_reviews)
+    (text_width, text_height), baseline = cv2.getTextSize(text, font, 1.2, 3)
+    text_x = bottom_right_x + (block_width - text_width) // 2
+    text_y = bottom_right_y + (block_height + text_height) // 2
+    cv2.putText(frame, text, (text_x, text_y), font, 1.2, (255, 255, 255), 3)
+    
+    return frame
+
+def draw_confirmation_message(frame):
+    """Draw confirmation message overlay"""
+    global confirmation_message
+    
+    if not confirmation_message:
+        return frame
+    
+    # Draw semi-transparent overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+    
+    # Draw message box
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1.0
+    thickness = 2
+    
+    # Split message into lines if needed
+    lines = confirmation_message.split('\n')
+    max_width = 0
+    total_height = 0
+    
+    for line in lines:
+        (text_width, text_height), baseline = cv2.getTextSize(line, font, font_scale, thickness)
+        max_width = max(max_width, text_width)
+        total_height += text_height + 20
+    
+    box_width = max_width + 60
+    box_height = total_height + 40
+    box_x = (frame.shape[1] - box_width) // 2
+    box_y = (frame.shape[0] - box_height) // 2
+    
+    # Draw box background
+    cv2.rectangle(frame, (box_x, box_y), (box_x + box_width, box_y + box_height), (50, 50, 50), -1)
+    cv2.rectangle(frame, (box_x, box_y), (box_x + box_width, box_y + box_height), (255, 255, 255), 3)
+    
+    # Draw text lines
+    y_offset = box_y + 50
+    for line in lines:
+        (text_width, text_height), baseline = cv2.getTextSize(line, font, font_scale, thickness)
+        text_x = box_x + (box_width - text_width) // 2
+        cv2.putText(frame, line, (text_x, y_offset), font, font_scale, (255, 255, 255), thickness)
+        y_offset += text_height + 20
+    
+    return frame
+
+def handle_review_request(team_name):
+    """Handle review request for a team"""
+    global rutvik_reviews, rishaan_reviews, pending_review, confirmation_message
+    
+    # Check if team has reviews left
+    if team_name == 'rutvik' and rutvik_reviews <= 0:
+        print(f"[INFO] Rutvik has no reviews left")
+        return
+    elif team_name == 'rishaan' and rishaan_reviews <= 0:
+        print(f"[INFO] Rishaan has no reviews left")
+        return
+    
+    # Set pending review and show confirmation message
+    pending_review = team_name
+    confirmation_message = f"Is review successful for {team_name.upper()}?\n\nPress Y for Yes\nPress N for No"
+    print(f"[INFO] Review requested for {team_name}. Waiting for confirmation (Y/n)...")
+
+def handle_review_confirmation(confirmed):
+    """Handle review confirmation (Y or N)"""
+    global rutvik_reviews, rishaan_reviews, pending_review, confirmation_message
+    
+    if not pending_review:
+        return
+    
+    team_name = pending_review
+    
+    if confirmed:
+        # Y pressed: Review successful, keep the review (don't reduce count)
+        print(f"[INFO] Review successful for {team_name}. Review kept. Reviews remaining: {rutvik_reviews if team_name == 'rutvik' else rishaan_reviews}")
+    else:
+        # N pressed: Review not successful, use 1 review (reduce count)
+        if team_name == 'rutvik':
+            rutvik_reviews = max(0, rutvik_reviews - 1)
+            print(f"[INFO] Review used for rutvik. Reviews remaining: {rutvik_reviews}")
+        elif team_name == 'rishaan':
+            rishaan_reviews = max(0, rishaan_reviews - 1)
+            print(f"[INFO] Review used for rishaan. Reviews remaining: {rishaan_reviews}")
+    
+    # Clear pending review
+    pending_review = None
+    confirmation_message = ""
+
 def cleanup():
     """Cleanup resources"""
     global camera_writer, is_recording
@@ -364,6 +539,7 @@ atexit.register(cleanup)
 print("[INFO] Ball Review System started")
 print("[INFO] Starting continuous recording...")
 print(f"[INFO] Press '{chr(SAVE_KEY)}' to save and email recording, '{chr(QUIT_KEY)}' to quit")
+print(f"[INFO] Press '{chr(RUTVIK_KEY)}' for rutvik review, '{chr(RISHaan_KEY)}' for rishaan review")
 
 # Start recording immediately
 start_recording()
@@ -443,30 +619,51 @@ try:
             cv2.putText(display_frame, duration_text, (10, 110), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
+        # Draw scoreboard
+        display_frame = draw_scoreboard(display_frame)
+        
+        # Draw confirmation message if pending
+        if pending_review:
+            display_frame = draw_confirmation_message(display_frame)
+        
         # Display frame
         cv2.imshow('Ball Review System', display_frame)
         
         # Check for key presses
         key = cv2.waitKey(1) & 0xFF
         
-        if key == SAVE_KEY:
-            print(f"[INFO] Save key pressed. Saving and sending recording...")
-            result = stop_and_save_recording()
-            if result:
-                video_path, recording_start_dt = result
-                # Process and send in background thread
-                email_thread = threading.Thread(
-                    target=process_and_send_recording,
-                    args=(video_path, recording_start_dt),
-                    daemon=True
-                )
-                email_thread.start()
-                print("[INFO] Recording saved and email sending started in background...")
-                print("[INFO] Recording continues...")
-        
-        elif key == QUIT_KEY:
-            print("[INFO] Quit key pressed. Stopping...")
-            break
+        # Handle confirmation (Y or N) if pending review
+        if pending_review:
+            if key == ord('y') or key == ord('Y'):
+                handle_review_confirmation(True)
+            elif key == ord('n') or key == ord('N'):
+                handle_review_confirmation(False)
+        else:
+            # Handle normal key presses
+            if key == SAVE_KEY:
+                print(f"[INFO] Save key pressed. Saving and sending recording...")
+                result = stop_and_save_recording()
+                if result:
+                    video_path, recording_start_dt = result
+                    # Process and send in background thread
+                    email_thread = threading.Thread(
+                        target=process_and_send_recording,
+                        args=(video_path, recording_start_dt),
+                        daemon=True
+                    )
+                    email_thread.start()
+                    print("[INFO] Recording saved and email sending started in background...")
+                    print("[INFO] Recording continues...")
+            
+            elif key == RUTVIK_KEY:
+                handle_review_request('rutvik')
+            
+            elif key == RISHaan_KEY:
+                handle_review_request('rishaan')
+            
+            elif key == QUIT_KEY:
+                print("[INFO] Quit key pressed. Stopping...")
+                break
 
 except KeyboardInterrupt:
     print("\n[INFO] Interrupted by user")
@@ -474,4 +671,3 @@ except KeyboardInterrupt:
 finally:
     cleanup()
     print("[INFO] Ball Review System stopped")
-
